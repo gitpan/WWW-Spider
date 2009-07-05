@@ -2,14 +2,15 @@ package WWW::Spider;
 
 =head1 NAME
 
-WWW::Spider - customizable internet spider
+WWW::Spider - flexible Internet spider for fetching and analyzing websites
 
 =head1 VERSION
 
-This document describes C<WWW::Spider> version 0.01_01
+This document describes C<WWW::Spider> version 0.01_05
 
 =head1 SYNOPSIS
 
+ #configuration
  my $spider=new WWW::Spider;
  $spider=new WWW::Spider({UASTRING=>"mybot"});
  
@@ -17,10 +18,30 @@ This document describes C<WWW::Spider> version 0.01_01
  $spider->uastring('New UserAgent String');
  $spider->user_agent(new LWP::UserAgent);
  
+ #basic stuff
  print $spider->get_page_response('http://search.cpan.org/')->content;
  print $spider->get_page_content('http://search.cpan.org/');
+ $spider->get_links_from('http://google.com/');#get array of URLs
 
 =head1 DESCRIPTION
+
+WWW::Spider is a customizable Internet spider intended to be used for
+fetching and analyzing websites.  Features include:
+
+=over
+
+=item * basic methods for high-level html handling
+
+=item * the manner in which pages are retrieved is customizable
+
+=item * callbacks for when pages are fetched, errors caused, etc...
+
+=item * caching
+
+=item * a high-level implementation of a 'graph' of either pages or
+sites (as defined by the callback) which can be analyzed
+
+=back
 
 =cut
 
@@ -32,7 +53,7 @@ use HTTP::Request;
 use Thread::Queue;
 
 use vars qw( $VERSION );
-$VERSION = '0.01_01';
+$VERSION = '0.01_05';
 
 =pod
 
@@ -200,7 +221,30 @@ breadth-first search using C<Thread::Queue>.
 sub crawl_content {
     (my $self,my $content,my $max_depth,my $source)=@_;
     $self->handle_content($content,$source);
-    my $q=new Thread::Queue;
+    my %urls_done;
+    $urls_done{$source}=1;
+    my @links=$self->get_links_from_content($content,$source);
+    my $q=new Thread::Queue(@links);
+    my $depth=0;
+    $q->enqueue('--');
+    while($q->pending()>0 and $max_depth>$depth) {
+	my $link=$q->dequeue;
+	if($link eq '--') {
+	    $depth++;
+	    $q->enqueue('--');
+	    next;
+	}
+	next if $urls_done{$link};
+	my $tmp_content=$self->get_page_content($link);
+	$self->handle_content($tmp_content,$link);
+	$urls_done{$link}=1;
+	print $link."\n";
+	@links=$self->get_links_from_content($tmp_content,$link);
+	for my $a (@links) {
+	    next if $urls_done{$a};
+	    $q->enqueue($a);
+	}
+    }
 }
 
 =pod
@@ -225,7 +269,7 @@ Returns a list of URLs linked to from URL.
 =cut
 
 sub get_links_from {
-    (my $self,my $url)=@_;
+    my ($self,$url)=@_;
     return $self->get_links_from_content($self->get_page_content($url),$url);    
 }
 
