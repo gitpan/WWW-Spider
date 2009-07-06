@@ -6,7 +6,7 @@ WWW::Spider - flexible Internet spider for fetching and analyzing websites
 
 =head1 VERSION
 
-This document describes C<WWW::Spider> version 0.01_05
+This document describes C<WWW::Spider> version 0.01_07
 
 =head1 SYNOPSIS
 
@@ -22,6 +22,10 @@ This document describes C<WWW::Spider> version 0.01_05
  print $spider->get_page_response('http://search.cpan.org/')->content;
  print $spider->get_page_content('http://search.cpan.org/');
  $spider->get_links_from('http://google.com/');#get array of URLs
+ 
+ #registering hooks
+ 
+ #crawling
 
 =head1 DESCRIPTION
 
@@ -38,6 +42,9 @@ fetching and analyzing websites.  Features include:
 
 =item * caching
 
+=item * thread-safe operation, and optional multithreading operation
+(faster)
+
 =item * a high-level implementation of a 'graph' of either pages or
 sites (as defined by the callback) which can be analyzed
 
@@ -48,12 +55,13 @@ sites (as defined by the callback) which can be analyzed
 use strict;
 use warnings;
 
+use Carp;
 use LWP::UserAgent;
 use HTTP::Request;
 use Thread::Queue;
 
 use vars qw( $VERSION );
-$VERSION = '0.01_05';
+$VERSION = '0.01_07';
 
 =pod
 
@@ -103,6 +111,10 @@ argument is ignored.
     $ua->agent($uastring);
     $ua=$params->{USER_AGENT} || $ua;
     $self->{USER_AGENT}=$ua;
+
+    $self->{CALLBACKS}={};
+    $self->{CALLBACKS}->{'handle-page'}=[];
+
     bless $self,$class;
     return $self;
 }
@@ -111,7 +123,7 @@ argument is ignored.
 
 =back
 
-=item user_agent [LWP::UserAgent]
+=item ->user_agent [LWP::UserAgent]
 
 Returns/sets the user agent being used by this object.
 
@@ -126,7 +138,7 @@ sub user_agent {
 
 =pod
 
-=item uastring [STRING]
+=item ->uastring [STRING]
 
 Returns/sets the user agent string being used by this object.
 
@@ -149,7 +161,7 @@ functions for the rest of the code.
 
 =over
 
-=item get_page_content URL
+=item ->get_page_content URL
 
 Returns the contents of the page at URL.
 
@@ -162,7 +174,7 @@ sub get_page_content {
 
 =pod
 
-=item get_page_response URL
+=item ->get_page_response URL
 
 Returns the HTTP::Response object corresponding to URL
 
@@ -183,7 +195,7 @@ These functions implement the spider functionality.
 
 =over
 
-=item crawl URL MAX_DEPTH
+=item ->crawl URL MAX_DEPTH
 
 Crawls URL to the specified maxiumum depth.  This is implemented as a
 breadth-first search.
@@ -197,7 +209,7 @@ sub crawl {
 
 =pod
 
-=item handle_url URL
+=item ->handle_url URL
 
 The same as C<crawl(URL,0)>.
 
@@ -210,7 +222,7 @@ sub handle_url {
 
 =pod
 
-=item crawl_content STRING MAX_DEPTH [$SOURCE]
+=item ->crawl_content STRING MAX_DEPTH [$SOURCE]
 
 Treats STRING as if it was encountered during a crawl, with a
 remaining maximum depth of MAX_DEPTH.  The crawl is implemented as a
@@ -231,11 +243,14 @@ sub crawl_content {
 	my $link=$q->dequeue;
 	if($link eq '--') {
 	    $depth++;
+	    print "========================================\nDepth is $depth\n";
 	    $q->enqueue('--');
 	    next;
 	}
 	next if $urls_done{$link};
-	my $tmp_content=$self->get_page_content($link);
+	my $result=$self->get_page_response($link);
+	next unless $result->header('Content-type')=~/^text/;
+	my $tmp_content=$result->content;
 	$self->handle_content($tmp_content,$link);
 	$urls_done{$link}=1;
 	print $link."\n";
@@ -249,7 +264,7 @@ sub crawl_content {
 
 =pod
 
-=item handle_content $CONTENT [$SOURCE]
+=item ->handle_content $CONTENT [$SOURCE]
 
 Runs appropriate handlers on STRING, without crawling to any other
 pages.
@@ -262,7 +277,7 @@ sub handle_content {
 
 =pod
 
-=item get_links_from URL
+=item ->get_links_from URL
 
 Returns a list of URLs linked to from URL.
 
@@ -275,7 +290,7 @@ sub get_links_from {
 
 =pod
 
-=item get_links_from_content $CONTENT [$SOURCE]
+=item ->get_links_from_content $CONTENT [$SOURCE]
 
 Returns a list of URLs linked to in STRING.  When a URL is discovered
 that is not complete, it is fixed by assuming that is was found on
@@ -302,8 +317,10 @@ sub get_links_from_content {
     while($content=~/<a ([^>]* )?href *= *\"([^\"]*)\"/msg) {
 	my $partial=$2;
 	my $url;
-	if($partial=~/^http:\/\//) {
+	if($partial=~/^http:\/\/.*\//) {
 	    $url=$partial;
+	} elsif($partial=~/^http:\/\//) {
+	    $url=$partial."/";
 	} elsif($partial=~/^\/(.*)$/g) {
 	    $url=$domain.$1;
 	} else {
@@ -318,71 +335,115 @@ sub get_links_from_content {
 
 =back
 
-=head2 CALLBACKS
+=head2 CALLBACKS AND HOOKS
+
+All hook registration and deletion functions are considered atomic.
+If five hooks have been registered, and then all of them are deleted
+in one operation, there will be no page for which fewer than five but
+more than zero of those hooks are called (unless some hooks are added
+afterwords).
+
+The legal hook strings are:
 
 =over
 
+=item * handle-page
+
+Called whenever a crawlable page is reached.
+
+Arguments: CONTENT, URL
+
+Return: 
+
+=item * handle-response
+
+Called on an HTTP response, successfull, crawlable, or otherwise.
+
+Arguments:
+
+Return:
+
+=item * handle-failure
+
+Called on any failed HTTP response.
+
+Arguments:
+
+Return:
+
+=back
+
+Functions for handling callbacks are:
+
+=over
+
+=item ->call_hooks HOOK-STRING, @ARGS
+
+Calls all of the registered HOOK-STRING callbacks with @ARGS.  This
+function returns a list of all of the return values (in some
+unspecified order) which are to be handled appropriately by the
+caller.
+
 =cut
 
-# =item add_handler SUB [STRING]
+sub call_hooks {
+    my ($self,$name,@args)=@_;
+    my @list=$self->get_hooks($name);
+    my @ret;
+    for my $hook (@list) {
+	push @ret,&$hook(@args);
+    }
+    return @ret;
+}
 
-# Adds the specified handlers to this object.  If specified, the STRING
-# becomes this handler's name; otherwise, a string is generated and
-# returned.
+=pod
 
-# =cut
+=item ->register_hook HOOK-STRING, SUB, [{OPTIONS}]
 
-# sub add_handler {
+Registers a subroutine to be run on HOOK-STRING.  Has no return value.
+Valid options are:
 
-# }
+=over
 
-# =pod
+=item * FORK
 
-# =item get_handler STRING
+Set to a non-zero value if you want this hook to be run in a separate
+thread.  This means that, among other things, the return value will
+not have the same affect (or even a well defined affect).
 
-# Returns the handler named STRING.
+=back
 
-# =cut
+=cut
 
-# sub get_handler {
+sub register_hook {
+    my ($self,$name,$hook,$options)=@_;
+}
 
-# }
+=pod
 
-# =pod
+=item ->get_hooks [HOOK-STRING]
 
-# =item get_handlers
+Returns all hooks corresponding to HOOK-STRING.  If HOOK-STRING is not
+given, returns all hooks.
 
-# Returns all of the page handlers
+=cut
 
-# =cut
+sub get_hooks {
+    my ($self,$name)=@_;
+}
 
-# sub get_handlers {
-    
-# }
+=pod
 
-# =pod
+=item ->clear_hooks [HOOK-STRING]
 
-# =item remove_handler STRING
+Removes all hooks corresponding to HOOK-STRING.  If HOOK-STRING is not
+given, it deletes all hooks.
 
-# Removes the handler named STRING
+=cut
 
-# =cut
-
-# sub remove_handler {
-
-# }
-
-# =pod
-
-# =item clear_handlers
-
-# Removes all handlers from this object.
-
-# =cut
-
-# sub remove_handlers {
-
-# }
+sub clear_hooks {
+    my ($self,$name)=@_;
+}
 
 1;
 
@@ -392,12 +453,16 @@ __END__
 
 =head1 BUGS AND LIMITATIONS
 
+Hooks are not yet fully implemented
+
 =head1 MODULE DEPENDENCIES
 
 WWW::Spider depends on several other modules that allow it to get and
 parse HTML code.  Currently used are:
 
 =over
+
+=item * Carp
 
 =item * LWP::UserAgent
 
@@ -407,7 +472,15 @@ parse HTML code.  Currently used are:
 
 =back
 
-Other modules will likely be added to this list in the future.
+Other modules will likely be added to this list in the future.  Candidates are:
+
+=over
+
+=item * HTML::*
+
+=item * WWW::Spider::Graph (or WWW::Graph)
+
+=back
 
 =head1 SEE ALSO
 
