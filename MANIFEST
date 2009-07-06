@@ -3,6 +3,8 @@ MANIFEST
 Makefile.PL
 README
 lib/WWW/Spider.pm
+lib/WWW/Spider/Graph.pm
+lib/WWW/Spider/Hooklist.pm
 t/00-load.t
 t/pod-coverage.t
 t/pod.t

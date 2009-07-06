@@ -6,7 +6,7 @@ WWW::Spider - flexible Internet spider for fetching and analyzing websites
 
 =head1 VERSION
 
-This document describes C<WWW::Spider> version 0.01_07
+This document describes C<WWW::Spider> version 0.01_09
 
 =head1 SYNOPSIS
 
@@ -60,8 +60,11 @@ use LWP::UserAgent;
 use HTTP::Request;
 use Thread::Queue;
 
+use WWW::Spider::Graph;
+use WWW::Spider::Hooklist;
+
 use vars qw( $VERSION );
-$VERSION = '0.01_08';
+$VERSION = '0.01_09';
 
 =pod
 
