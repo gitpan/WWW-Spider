@@ -19,9 +19,9 @@ This document describes C<WWW::Spider> version 0.01_07
  $spider->user_agent(new LWP::UserAgent);
  
  #basic stuff
- print $spider->get_page_response('http://search.cpan.org/')->content;
+ print $spider->get_page_response('http://search.cpan.org/') -> content;
  print $spider->get_page_content('http://search.cpan.org/');
- $spider->get_links_from('http://google.com/');#get array of URLs
+ $spider->get_links_from('http://google.com/'); #get array of URLs
  
  #registering hooks
  
@@ -61,7 +61,7 @@ use HTTP::Request;
 use Thread::Queue;
 
 use vars qw( $VERSION );
-$VERSION = '0.01_07';
+$VERSION = '0.01_08';
 
 =pod
 
@@ -112,8 +112,8 @@ argument is ignored.
     $ua=$params->{USER_AGENT} || $ua;
     $self->{USER_AGENT}=$ua;
 
-    $self->{CALLBACKS}={};
-    $self->{CALLBACKS}->{'handle-page'}=[];
+    $self->{HOOKS}={};
+    $self->{HOOKS}->{'handle-page'}=[];
 
     bless $self,$class;
     return $self;
@@ -200,11 +200,17 @@ These functions implement the spider functionality.
 Crawls URL to the specified maxiumum depth.  This is implemented as a
 breadth-first search.
 
+The default value for MAX_DEPTH is 0.
+
 =cut
 
 sub crawl {
     (my $self,my $url,my $max_depth)=@_;
-    $self->crawl_content($self->get_page_content($url),$max_depth,$url);
+    $max_depth=$max_depth || 0;
+    croak "fatal: crawl called with empty url string" unless $url;
+    my $response=$self->get_page_response($url);
+    $self->handle_response($response);
+    $self->crawl_content($response->content,$max_depth,$url);
 }
 
 =pod
@@ -217,22 +223,29 @@ The same as C<crawl(URL,0)>.
 
 sub handle_url {
     my ($self,$url)=@_;
-    $self->handle_content($self->get_page_content($url),$url);
+    croak "fatal: handle_url called with empty url string" unless $url;
+    $self->handle_response($self->get_page_response($url));
 }
 
 =pod
 
-=item ->crawl_content STRING MAX_DEPTH [$SOURCE]
+=item ->crawl_content STRING [$MAX_DEPTH] [$SOURCE]
 
 Treats STRING as if it was encountered during a crawl, with a
 remaining maximum depth of MAX_DEPTH.  The crawl is implemented as a
 breadth-first search using C<Thread::Queue>.
 
+The default value for MAX_DEPTH is 0.
+
+The assumption is made that handlers have already been called on this
+page (otherwise, implementation would be impossible).
+
 =cut
 
 sub crawl_content {
     (my $self,my $content,my $max_depth,my $source)=@_;
-    $self->handle_content($content,$source);
+    croak "fatal: crawl_content called with empty content string" unless $content;
+    $max_depth=$max_depth || 0;
     my %urls_done;
     $urls_done{$source}=1;
     my @links=$self->get_links_from_content($content,$source);
@@ -243,17 +256,15 @@ sub crawl_content {
 	my $link=$q->dequeue;
 	if($link eq '--') {
 	    $depth++;
-	    print "========================================\nDepth is $depth\n";
 	    $q->enqueue('--');
 	    next;
 	}
 	next if $urls_done{$link};
-	my $result=$self->get_page_response($link);
-	next unless $result->header('Content-type')=~/^text/;
-	my $tmp_content=$result->content;
-	$self->handle_content($tmp_content,$link);
+	my $response=$self->get_page_response($link);
+	next unless $response->header('Content-type')=~/^text/;
+	my $tmp_content=$response->content;
+	$self->handle_response($response);
 	$urls_done{$link}=1;
-	print $link."\n";
 	@links=$self->get_links_from_content($tmp_content,$link);
 	for my $a (@links) {
 	    next if $urls_done{$a};
@@ -264,15 +275,16 @@ sub crawl_content {
 
 =pod
 
-=item ->handle_content $CONTENT [$SOURCE]
+=item ->handle_response HTTP::RESPONSE
 
-Runs appropriate handlers on STRING, without crawling to any other
-pages.
+Handles the HTTP reponse, calling the appropriate hooks, without
+crawling any other pages.
 
 =cut
 
-sub handle_content {
-    my ($self, $content,$source)=@_;
+sub handle_response {
+    my ($self, $content)=@_;
+    carp "warning: handle_response called with empty content string" unless $content;
 }
 
 =pod
@@ -285,6 +297,7 @@ Returns a list of URLs linked to from URL.
 
 sub get_links_from {
     my ($self,$url)=@_;
+    croak "fatal: get_links_from called with empty url string" unless $url;
     return $self->get_links_from_content($self->get_page_content($url),$url);    
 }
 
@@ -303,6 +316,7 @@ SOURCE must be a valid and complete url.
 
 sub get_links_from_content {
     (my $self,my $content,my $source)=@_;
+    croak "fatal: get_links_from_content called with empty content string" unless $content;
     my @list;
     my $domain="http://localhost/";
     my $root="http://localhost/";
@@ -453,7 +467,13 @@ __END__
 
 =head1 BUGS AND LIMITATIONS
 
-Hooks are not yet fully implemented
+=over
+
+=item * Hooks are not yet fully implemented.
+
+=item * Hook list modifications are not atomic
+
+=back
 
 =head1 MODULE DEPENDENCIES
 
@@ -462,13 +482,13 @@ parse HTML code.  Currently used are:
 
 =over
 
-=item * Carp
+=item * C<Carp>
 
-=item * LWP::UserAgent
+=item * C<LWP::UserAgent>
 
-=item * HTTP::Request
+=item * C<HTTP::Request>
 
-=item * Thread::Queue
+=item * C<Thread::Queue>
 
 =back
 
@@ -478,15 +498,19 @@ Other modules will likely be added to this list in the future.  Candidates are:
 
 =item * HTML::*
 
-=item * WWW::Spider::Graph (or WWW::Graph)
-
 =back
 
 =head1 SEE ALSO
 
 =over
 
-=item * WWW::Robot
+=item * C<WWW::Robot>
+
+Another web crawler, with rather different capabilities.
+
+=item * C<WWW::Spider::Graph>
+
+Implementation of a graph based on WWW::Spider.
 
 =back
 
