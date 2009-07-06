@@ -6,7 +6,7 @@ WWW::Spider::Graph
 
 =head1 VERSION
 
-version 0.01_09
+version 0.01_10
 
 =head1 SYNOPSIS
 
@@ -20,7 +20,7 @@ use warnings;
 use WWW::Spider;
 
 use vars qw($VERSION);
-$VERSION='0.01_09';
+$VERSION='0.01_10';
 
 =pod
 

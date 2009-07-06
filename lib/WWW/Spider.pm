@@ -6,7 +6,7 @@ WWW::Spider - flexible Internet spider for fetching and analyzing websites
 
 =head1 VERSION
 
-This document describes C<WWW::Spider> version 0.01_09
+This document describes C<WWW::Spider> version 0.01_10
 
 =head1 SYNOPSIS
 
@@ -55,6 +55,7 @@ sites (as defined by the callback) which can be analyzed
 use strict;
 use warnings;
 
+use threads;
 use Carp;
 use LWP::UserAgent;
 use HTTP::Request;
@@ -64,7 +65,7 @@ use WWW::Spider::Graph;
 use WWW::Spider::Hooklist;
 
 use vars qw( $VERSION );
-$VERSION = '0.01_09';
+$VERSION = '0.01_10';
 
 =pod
 
@@ -115,8 +116,7 @@ argument is ignored.
     $ua=$params->{USER_AGENT} || $ua;
     $self->{USER_AGENT}=$ua;
 
-    $self->{HOOKS}={};
-    $self->{HOOKS}->{'handle-page'}=[];
+    $self->{HOOKS}=new WWW::Spider::Hooklist(['']);
 
     bless $self,$class;
     return $self;
@@ -493,6 +493,8 @@ parse HTML code.  Currently used are:
 
 =item * C<Thread::Queue>
 
+=item * C<Thread::Resource::RWLock>
+
 =back
 
 Other modules will likely be added to this list in the future.  Candidates are:
@@ -514,6 +516,10 @@ Another web crawler, with rather different capabilities.
 =item * C<WWW::Spider::Graph>
 
 Implementation of a graph based on WWW::Spider.
+
+=item * C<WWW::Spider::Hooklist>
+
+A thread-safe list of hooks.
 
 =back
 

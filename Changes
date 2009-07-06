@@ -1,5 +1,8 @@
 Revision history for WWW-Spider
 
-0.01    Date/time
+0.01_09 06.07.2009
+	Added structure for storing the graph and the hooklist.
+
+0.01_01 04.07.2009
         First version, released on an unsuspecting world.
 
